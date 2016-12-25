@@ -1,0 +1,554 @@
+## Objective ##
+
+# Allstate Insurance Claim Severity #
+
+In a serious car accident, your focus is on the things that matter the most: family, friends, and other loved ones. At that point in time pushing paper or opening a claim with your insurance agent is the last thing you want your time or mental energy spent. This project is developed for ALLstate, a personal insurer in the United States to predict the cost and severity of claims and eventually improve the claims service to ensure a worry-free customr experience. The data for this project have been downloaded from Kaggle. The final submission will be based on following:-
+
+1. Mean Absolute Error(MAE) between the predicted loss and the actual loss
+2. Predicting the cost and severity of claims
+3. For every id in the test set, predicting the loss value
+4. Improve claims service 
+
+# Library #
+
+```{r echo = FALSE}
+#Sys.setenv(JAVA_HOME='C:\\Program Files\\Java\\jre1.8.0_91')
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(AICcmodavg)
+library(caret)
+library(kernlab)
+library(data.table)
+library(h2o)
+library(grid)
+library(MASS)
+library(vcd)
+library(graphics)
+```
+
+# Loading and cleaning data #
+```{r echo = FALSE}
+#setwd("C:/Program Files/RStudio/kaggle/ALLSTATE")
+DataSampleSub <- read.csv("../input/sample_submission.csv")
+#DataSubRepOutlier <- read.csv("sam_sub_replace_outlier.csv")
+#DataSubWoutOutlier <- read.csv("sam_sub_wout_outlier.csv")
+DataAllStateTest <- read.csv("../input/test.csv", stringsAsFactors = T)
+DataAllStateTrain <- read.csv("../input/train.csv", stringsAsFactors = T)
+DataAllStateTrain <- na.omit(DataAllStateTrain)
+DataAllStateTest <- na.omit(DataAllStateTest)
+DataAllStateTrain <- data.frame(DataAllStateTrain)
+DataAllStateTest <- data.frame(DataAllStateTest)
+Last <- DataAllStateTrain
+```
+
+
+# Fit the right model using complete Training data set including outliers #
+```{r echo = FALSE}
+set.seed(1234)
+N <- DataAllStateTrain
+# temp <- runif(N)
+reggNId <- glm(N$id ~ N$loss,family=gaussian(link="identity"))
+# reggGId <- suppressWarnings(glm(N$id ~ N$loss,family=Gamma(link="identity")))
+reggNlog <- suppressWarnings(glm(N$id ~ N$loss,family=gaussian(link="log")))
+reggGlog <- suppressWarnings(glm(N$id ~ N$loss,family=Gamma(link="log")))
+
+# Test normaility of deviation residuals including outliers
+par(mfrow = c(1, 2))
+plot(reggNlog,2)
+title("Gaussian assumption")
+plot(reggGlog,2)
+title("Gamma assumption")
+
+# Scatter plot of deviance residuals including outliers
+par(mfrow = c(1, 2))
+plot(reggNlog, 1)
+title("Gaussian assumption")
+plot(reggGlog, 1)
+title("Gamma assumption")
+par(mfrow = c(1, 1))
+
+# Compare models with AIC
+# Akaike information criterion (AIC) provides a means for comparison among models
+AIC(reggNId, reggNlog, reggGlog)
+rm(reggNlog, reggGlog, reggNId, temp)
+```
+
+# Fit a linear model
+```{r echo = FALSE}
+#DataAllStateTest$loss <- 0
+#DataAllStateTest <- data.frame(DataAllStateTest)
+#testing <- DataAllStateTest
+testing <- fread("sample_submission.csv")
+#testing <- head(DataAllStateTest, 1000)
+lm1 <- glm(id ~ loss, data = N)
+lm1
+```
+
+# Model Fit
+```{r echo = FALSE}
+plot(N$id, N$loss, type = "b", pch = 19)
+lines(N$loss, lm1$fitted.values, lwd = 3, col = "red")
+```
+
+# Predict a new value
+```{r echo = FALSE}
+prediction <- predict(lm1, newdata = testing)
+```
+
+# Plot predictions - Training and Testing 
+```{r echo = FALSE}
+par(mfrow = c(1,2))
+plot(N$id, N$loss, pch = 19, col = "blue",
+     xlab = "ID", ylab = "Loss",
+     main = "Training Data Set")
+lines(N$loss, predict(lm1), lwd = 3, col = "red")
+plot(testing$id, testing$loss, pch = 19, col = "blue",
+     xlab = "ID", ylab = "Loss",
+     main = "Testing Data Set")
+lines(testing$id, prediction, lwd = 3, col = "red")
+rm(lm1, N, prediction)
+```
+
+# Predict New loss value for the testing data set using h2o package
+```{r echo = FALSE}
+# Using only continuous variables from bo the testing and training data sets
+#training <- DataAllStateTrain[, -(1:117)]
+#submission <- DataAllStateTest[, 1]
+#testing <- DataAllStateTest[, -(1:117)]
+#features <- colnames(training)[-15]
+#label <- "loss"
+# Using the H20 pacakge to predict as it is faster than other models
+#localH2O <-h2o.init(nthreads = -1)
+#h2o.init
+#training.h2o <- as.h2o(training)
+#testing.h2o <- as.h2o(testing)
+#colnames(training.h2o)
+#gbm.model <- h2o.gbm(features, label, training_frame = training.h2o, 
+#                    ntrees = 1000, max_depth = 4, learn_rate = 0.05, seed = 12345)
+#h2o.performance(gbm.model)
+#predict.gbm <- as.data.frame(h2o.predict(gbm.model, testing.h2o))
+#submission <- fread("sample_submission.csv", colClasses = c("integer", "numeric"))
+#submission$loss <- predict.gbm
+
+# Using all variables except id
+training <- DataAllStateTrain[, -1]
+submission <- DataAllStateTest[, 1]
+testing <- DataAllStateTest[, -1]
+features <- colnames(training)[-131]
+label <- "loss"
+localH2O <-h2o.init(nthreads = -1)
+h2o.init
+training.h2o <- as.h2o(training)
+testing.h2o <- as.h2o(testing)
+colnames(training.h2o)
+# Using GBM in h2o for prediction
+system.time(gbm.model <- h2o.gbm(features, label, training_frame = training.h2o, 
+                     ntrees = 1000, max_depth = 4, learn_rate = 0.01, seed = 1234))
+h2o.performance(gbm.model)
+predict.gbm <- as.data.frame(h2o.predict(gbm.model, testing.h2o))
+
+# submission$loss <- predict.gbm
+# Deep learning algorith in h2o for prediction
+system.time(dlearning.model <- h2o.deeplearning(features, label, training_frame = training.h2o,
+                  epoch = 60, hidden = c(100,100), activation = "Rectifier",
+                  seed = 1122))
+h2o.performance(dlearning.model)
+predict.dlearning <- as.data.frame(h2o.predict(dlearning.model, testing.h2o))
+prediction_ensemble <- (predict.gbm + predict.dlearning)/2
+submission <- fread("sample_submission.csv", colClasses = c("integer", "numeric"))
+submission$loss <- prediction_ensemble
+# submission file full data set with outliers
+write.csv(submission, "sample_submission.csv", row.names = FALSE)
+t <- mean(training$loss)
+s <- mean(submission$loss)
+# Mean absolute error
+MAE <- abs(t - s)
+MAE
+rm(testing, training, predict.gbm, predict.dlearning, prediction_ensemble)
+```
+
+
+# To Find Outliers in Training dataset and remove them 
+```{r echo = FALSE}
+VarName <- eval(substitute(DataAllStateTrain$loss), eval(DataAllStateTrain))
+SumNotNa <- sum(!is.na(VarName))
+SumIsNa <- sum(is.na(VarName))
+Mean1 <- mean(VarName, na.rm = TRUE)
+par(mfrow = c(2,2), oma = c(0,0,3,0))
+boxplot(VarName, main = "With Outliers")
+hist(VarName, main = "With Outliers", xlab = NA, ylab = NA)
+outlier <- boxplot.stats(VarName)$out
+MeanOutlier <- mean(outlier)
+VarName <- ifelse(VarName %in% outlier, NA, VarName)
+boxplot(VarName, main = "Without Outliers")
+hist(VarName, main = "Without Outliers", xlab = NA, ylab = NA)
+title("Outlier Check for the Training Data Set", outer = TRUE)
+SumIsNa1 <- sum(is.na(VarName))
+cat("Outliers identified :", SumIsNa1 - SumIsNa, "\n")
+cat("Proportion(%) of outliers:", round((SumIsNa1 - SumIsNa) / SumNotNa * 100, 1), "\n")
+cat("Mean of outliers:", round(MeanOutlier, 2), "\n")
+Mean2 <- mean(VarName, na.rm = TRUE)
+cat("Mean without removing outliers:", round(Mean1, 2), "\n")
+cat("Mean if we remove outliers:", round(Mean2, 2), "\n")
+FindOutlier <- which(is.na(VarName))
+# Remove outliers from the Training dataset
+DataAllStateTrain <- DataAllStateTrain[-FindOutlier,]
+```
+
+# Fit the right model using complete Training data set excluding outliers #
+```{r echo = FALSE}
+N <- DataAllStateTrain
+temp <- runif(N)
+reggNId <- glm(N$id ~ N$loss,family=gaussian(link="identity"))
+# reggGId <- suppressWarnings(glm(N$id ~ N$loss,family=Gamma(link="identity")))
+reggNlog <- suppressWarnings(glm(N$id ~ N$loss,family=gaussian(link="log")))
+reggGlog <- suppressWarnings(glm(N$id ~ N$loss,family=Gamma(link="log")))
+
+# Test normaility of deviation residuals without outliers
+par(mfrow = c(1, 2))
+plot(reggNlog,2)
+title("Gaussian assumption without outliers")
+plot(reggGlog,2)
+title("Gamma assumption without outliers")
+
+# Scatter plot of deviance residuals without outliers
+par(mfrow = c(1, 2))
+plot(reggNlog, 1)
+title("Gaussian assumption without outliers")
+plot(reggGlog, 1)
+title("Gamma assumption outliers")
+par(mfrow = c(1, 1))
+
+# Compare models with AIC without outliers
+# Akaike information criterion (AIC) provides a means for comparison among models
+AIC(reggNId, reggNlog, reggGlog)
+rm(reggNlog, reggGlog, reggNId, N, temp)
+```
+
+# Predict New loss value for the testing data set using h2o package without outliers
+```{r echo = FALSE}
+training <- DataAllStateTrain[, -1]
+submission <- DataAllStateTest[, 1]
+testing <- DataAllStateTest[, -1]
+features <- colnames(training)[-131]
+label <- "loss"
+localH2O <-h2o.init(nthreads = -1)
+h2o.init
+training.h2o <- as.h2o(training)
+testing.h2o <- as.h2o(testing)
+colnames(training.h2o)
+# Using GBM in h2o for prediction
+system.time(gbm.model <- h2o.gbm(features, label, training_frame = training.h2o, 
+                     ntrees = 1000, max_depth = 4, learn_rate = 0.01, seed = 1234))
+h2o.performance(gbm.model)
+predict.gbm <- as.data.frame(h2o.predict(gbm.model, testing.h2o))
+
+# submission$loss <- predict.gbm
+# Deep learning algorith in h2o for prediction
+system.time(dlearning.model <- h2o.deeplearning(features, label, training_frame = training.h2o,
+                  epoch = 60, hidden = c(100,100), activation = "Rectifier",
+                  seed = 1122))
+h2o.performance(dlearning.model)
+predict.dlearning <- as.data.frame(h2o.predict(dlearning.model, testing.h2o))
+prediction_ensemble <- (predict.gbm + predict.dlearning)/2
+submission1 <- fread("sam_sub_wout_outlier.csv", colClasses = c("integer", "numeric"))
+submission1$loss <- prediction_ensemble
+# submission file full data set with outliers
+write.csv(submission1, "sam_sub_wout_outlier.csv", row.names = FALSE)
+t <- mean(training$loss)
+s <- mean(submission1$loss)
+# Mean absolute error
+MAE <- abs(t - s)
+MAE
+rm(testing, training, predict.gbm, predict.dlearning, prediction_ensemble)
+rm(submission, submission1)
+```
+
+# Replace outliers with the quantiles in the Training Data Set
+```{r echo = FALSE}
+DataOutlier <- data.frame(outlier)
+DataFindOutlier <- data.frame(FindOutlier)
+MergeData <- cbind(DataFindOutlier, DataOutlier)
+# Print a sample of outliers from a total of 11554 outliers
+head(MergeData, 20)
+quantiles <- quantile(Last$loss, probs = c(.05, .95), na.rm = TRUE)
+for (m in 1:nrow(MergeData)){
+  if (MergeData[m, 2] < quantiles[1]){
+       MergeData[m, 2] <- quantiles[1]
+       }
+       #else 
+      if (MergeData[m, 2] > quantiles[2]){
+       MergeData[m, 2] <- quantiles[2]  
+       }
+}
+# Replace outliers with quantiles in the data set
+
+#j <- 0 
+for (i in 1:nrow(MergeData)){
+      j <- MergeData[i, 1]
+      Last[j, 132] <- MergeData[i, 2]
+}
+```
+
+# Predict New loss value for the testing data set using h2o package with outliers 
+# replaced by quantiles
+```{r echo = FALSE}
+training <- Last[, -1]
+submission <- DataAllStateTest[, 1]
+testing <- DataAllStateTest[, -1]
+features <- colnames(training)[-131]
+label <- "loss"
+localH2O <-h2o.init(nthreads = -1)
+h2o.init
+training.h2o <- as.h2o(training)
+testing.h2o <- as.h2o(testing)
+colnames(training.h2o)
+# Using GBM in h2o for prediction
+system.time(gbm.model <- h2o.gbm(features, label, training_frame = training.h2o, 
+                     ntrees = 1000, max_depth = 4, learn_rate = 0.01, seed = 1234))
+h2o.performance(gbm.model)
+predict.gbm <- as.data.frame(h2o.predict(gbm.model, testing.h2o))
+
+# submission$loss <- predict.gbm
+# Deep learning algorith in h2o for prediction
+system.time(dlearning.model <- h2o.deeplearning(features, label, training_frame = training.h2o,
+                  epoch = 60, hidden = c(100,100), activation = "Rectifier",
+                  seed = 1122))
+h2o.performance(dlearning.model)
+predict.dlearning <- as.data.frame(h2o.predict(dlearning.model, testing.h2o))
+prediction_ensemble <- (predict.gbm + predict.dlearning)/2
+submission2 <- fread("sam_sub_replace_outlier.csv", colClasses = c("integer", "numeric"))
+submission2$loss <- prediction_ensemble
+# submission file full data set with outliers replaced with quantiles
+write.csv(submission2, "sam_sub_replace_outlier.csv", row.names = FALSE)
+t <- mean(training$loss)
+s <- mean(submission2$loss)
+# Mean absolute error
+MAE <- abs(t - s)
+MAE
+rm(testing, training, predict.gbm, predict.dlearning, prediction_ensemble)
+#rm(submission, submission1)
+```
+
+
+# Analyse categorical data from training data set
+```{r echo = FALSE}
+# plot of categorical variable cat 1 to cat 10
+CatData1 <- DataAllStateTrain[, 2:11]
+a1 <- count(CatData1, cat1, cat2, cat3, cat4, cat5, cat6, cat7, cat8, cat9, cat10)
+dfm1 <- melt(a1[, c('cat1', 'cat2', 'cat3', 'cat4','cat5', 'cat6', 'cat7', 'cat8', 'cat9',
+                  'cat10', 'n')], id.var = 11)
+ggplot(dfm1, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type") 
+
+# plot of categorical variable cat 11 to cat 20
+CatData2 <- DataAllStateTrain[, 12:21]
+a2 <- count(CatData2, cat11, cat12, cat13, cat14, cat15, cat16, cat17, cat18, cat19, cat20)
+dfm2 <- melt(a2[, c('cat11', 'cat12', 'cat13', 'cat14','cat15', 'cat16', 'cat17', 'cat18',
+                    'cat19', 'cat20', 'n')], id.var = 11)
+ggplot(dfm2, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type") 
+
+# plot of categorical variable cat 21 to cat 30
+CatData3 <- DataAllStateTrain[, 22:31]
+a3 <- count(CatData3, cat21, cat22, cat23, cat24, cat25, cat26, cat27, cat28, cat29, cat30)
+dfm3 <- melt(a3[, c('cat21', 'cat22', 'cat23', 'cat24','cat25', 'cat26', 'cat27', 'cat28',
+                    'cat29', 'cat30', 'n')], id.var = 11)
+ggplot(dfm3, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type") 
+
+
+# plot of categorical variable cat 31 to cat 40
+CatData4 <- DataAllStateTrain[, 32:41]
+a4 <- count(CatData4, cat31, cat32, cat33, cat34, cat35, cat36, cat37, cat38, cat39, cat40)
+dfm4 <- melt(a4[, c('cat31', 'cat32', 'cat33', 'cat34','cat35', 'cat36', 'cat37', 'cat38',
+                    'cat39', 'cat40', 'n')], id.var = 11)
+ggplot(dfm4, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type") 
+
+# plot of categorical variable cat 41 to cat 50
+CatData5 <- DataAllStateTrain[, 42:51]
+a5 <- count(CatData5, cat41, cat42, cat43, cat44, cat45, cat46, cat47, cat48, cat49, cat50)
+dfm5 <- melt(a5[, c('cat41', 'cat42', 'cat43', 'cat44','cat45', 'cat46', 'cat47', 'cat48',
+                    'cat49', 'cat50', 'n')], id.var = 11)
+ggplot(dfm5, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type") 
+
+
+# plot of categorical variable cat 51 to cat 60
+CatData6 <- DataAllStateTrain[, 52:61]
+a6 <- count(CatData6, cat51, cat52, cat53, cat54, cat55, cat56, cat57, cat58, cat59, cat60)
+dfm6 <- melt(a6[, c('cat51', 'cat52', 'cat53', 'cat54','cat55', 'cat56', 'cat57', 'cat58',
+                    'cat59', 'cat60', 'n')], id.var = 11)
+ggplot(dfm6, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type") 
+
+
+# plot of categorical variable cat 61 to cat 70
+CatData7 <- DataAllStateTrain[, 62:71]
+a7 <- count(CatData7, cat61, cat62, cat63, cat64, cat65, cat66, cat67, cat68, cat69, cat70)
+dfm7 <- melt(a7[, c('cat61', 'cat62', 'cat63', 'cat64','cat65', 'cat66', 'cat67', 'cat68',
+                    'cat69', 'cat70', 'n')], id.var = 11)
+ggplot(dfm7, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type") 
+
+
+# plot of categorical variable cat 71 to cat 80
+CatData8 <- DataAllStateTrain[, 72:81]
+a8 <- count(CatData8, cat71, cat72, cat73, cat74, cat75, cat76, cat77, cat78, cat79, cat80)
+dfm8 <- suppressWarnings(melt(a8[, c('cat71', 'cat72', 'cat73', 'cat74','cat75', 'cat76',
+                                     'cat77', 'cat78', 'cat79', 'cat80', 'n')], id.var = 11))
+ggplot(dfm8, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type") 
+
+
+# plot of categorical variable cat 81 to cat 90
+CatData9 <- DataAllStateTrain[, 82:91]
+a9 <- count(CatData9, cat81, cat82, cat83, cat84, cat85, cat86, cat87, cat88, cat89, cat90)
+dfm9 <- suppressWarnings(melt(a9[, c('cat81', 'cat82', 'cat83', 'cat84','cat85', 'cat86',
+                                     'cat87', 'cat88', 'cat89', 'cat90', 'n')], id.var = 11))
+ggplot(dfm9, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type")
+
+
+# plot of categorical variable cat 91 to cat 100
+CatData10 <- DataAllStateTrain[, 92:101]
+a10 <- count(CatData10, cat91, cat92, cat93, cat94, cat95, cat96, cat97, cat98, cat99, cat100)
+dfm10 <- suppressWarnings(melt(a10[, c('cat91', 'cat92', 'cat93', 'cat94','cat95', 'cat96',
+                                     'cat97', 'cat98', 'cat99', 'cat100', 'n')], id.var = 11))
+ggplot(dfm10, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type")
+
+
+# plot of categorical variable cat 101 to cat 110
+CatData11 <- DataAllStateTrain[, 102:111]
+a11 <- count(CatData11, cat101, cat102, cat103, cat104, cat105, cat106, cat107, cat108, cat109,
+             cat110)
+dfm11 <- suppressWarnings(melt(a11[, c('cat101', 'cat102', 'cat103', 'cat104','cat105',
+                        'cat106', 'cat107', 'cat108', 'cat109', 'cat110', 'n')], id.var = 11))
+ggplot(dfm11, aes(x = variable, y = n, fill = value)) +geom_bar(stat = 'identity',
+                position = "dodge") + xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") +
+                scale_fill_discrete(name = "CAT Type")
+
+# plot of categorical variable cat 111 to cat 116
+CatData12 <- DataAllStateTrain[, 112:117]
+a12 <- count(CatData12, cat111, cat112, cat113, cat114, cat115, cat116)
+dfm12 <- suppressWarnings(melt(a12[, c('cat111', 'cat112', 'cat113', 'cat114','cat115',
+                        'cat116', 'n')], id.var = 7))
+ggplot(dfm12, aes(x = variable, y = n)) +geom_point(position = 'jitter') + 
+                xlab("Categorical Variables") +ylab("Total Count") +
+                ggtitle("Plot of categorical Variables") 
+```
+The above graphical analysis of categorical variable confirms that CAT A claims contribute a major portion in the overal loss across all id's in the data set.
+
+
+# Analyse continuous data from training data set
+```{r echo = FALSE}
+ContData <- DataAllStateTrain[, 118:131]
+summary(ContData)
+cor(ContData)
+qplot(y = cont1+cont2+cont3+cont4+cont5+cont6+cont7+cont8+cont9+cont10+cont11+
+      cont12+cont13+cont14, data = ContData, col = "blue")
+# Principal component analysis (PCA)
+# PCA helps in finding out few 'principal' variables which explain significant amount of 
+# variation in dependent variables This technique, helps in reducing large number of variables  # to few significant variables. It helps to reduce noise, redundancy and enables quick 
+# computations.
+princompanly <- princomp(ContData, scores = TRUE, cor = TRUE)
+summary(princompanly)
+plot(princompanly, main = "Principal Component Analysis", col = "blue")
+# The plot clearly shows that the first principal component accounts for maximum information.
+# The analysis finds that var comp1 is greater than comp2 and so on. And we find that Comp 1, 
+# Comp 2 and Comp3 have values higher than 1
+
+# loadings - This represents the contribution of variables in each factor. Higher the
+# number higher is the contribution of a particular variable in a factor
+loadings(princompanly)
+
+#screeplot of eigen values ( Value of standard deviation is considered as eigen values)
+screeplot(princompanly, type = 'line', main = 'Screeplot of Standard Deviation')
+
+#Biplot of score variables
+biplot(princompanly, scale = 0, expand = 1, cex = 0.75)
+# Biplot shows the proportions of each variable along the two principal components.
+# we can see the two principal components (Comp.1 and Comp.2) of the dataset. The red arrows 
+# represent the loading vectors, which represent how the feature 'cont' varies along the 
+# principal component vectors. From the plot we can see that the first principal component
+# vector Comp.1 and second principal component vector Comp.2 does not place much weight on 
+# cont3, cont4 and cont5 variables. This shows that these variables are not closely corelated
+# to other variables such as cont1, cont2, con6, cont7, cont8, cont9, cont10, cont11,
+# cont12, cont13 and cont14
+
+# Scores of the components
+princompanly$scores[1:10,]
+```
+
+# Cost and severity of claims
+```{r echo = FALSE}
+severity <- DataAllStateTrain[, c(1, 132)]
+x <- log(severity$loss)
+h<-hist(x, col="red", xlab="Logarithmic Loss", 
+  	main="Histogram with Normal Curve")
+xfit<-seq(min(x),max(x),length=40) 
+yfit<-dnorm(xfit,mean=mean(x),sd=sd(x)) 
+yfit <- yfit*diff(h$mids[1:2])*length(x)
+lines(xfit, yfit, col="blue", lwd=2)
+
+par(mfrow = c(1,2))
+plot(density(severity$loss), main = "Loss", xlab = "", ylab = "")
+plot(density(log(severity$loss)), main = "Logarithmic loss", xlab = "", ylab = "")
+par(mfrow = c(1,1))
+```
+
+
+# Conclusion
+I have produced 3 different output files for the loss values to show how predicting a loss value correctly can enchance overall claims experience for the customer as well as the Insurance company. These output files are :-
+
+1. sample _submission.csv 
+(for the complete dataset including outliers)
+
+2. sam_sub_wout_outlier.csv
+(for complete dataset without outliers)
+
+3. sam_sub_replace_outlier.csv
+(for complete dataset with outliers replaced by quantiles)
+
+My analysis of the data shows that loss development that occurs is avoidable if addressed early in the claims life cycle. This helps in identifying and understanding these factors by which  early action could be taken from the first notice of loss to mitigate the development of the claim. 
+
+The prediction model that I have developed can be used to quantify the impact to the claims department resulting from the failure to meet or exceed claim service leading practices. The model can be used to identify the root cause of claim leakage. The predictive model that I have developed can help in 2 ways:-
+
+1. Early identification of claims with the potential for high leakage, thereby allowing for proactive management of the claim.
+
+2. Preventable causes - such as ineffecient processing, human error, outdated operational procedures and fraud.
+
+By doing this in my opinion will enhance overall customer service which will be benefitial for the company as well as the claimant plus help the insurance company as follows:-
+
+1. Timely allocation of resouces
+2. Reserving /settlement values
+3. Recognition of potentially fraudulent claims
+4. Identification of potentially high value losses
+5. Effective way to root out claim volatility
+
+
+
